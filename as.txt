@@ -1,0 +1,95 @@
+#include <iostream>
+#include <Windows.h>
+#include <tlhelp32.h>
+
+using namespace std;
+
+static void Add(int& a){
+	a++;
+}
+
+DWORD returnAddress = 0;
+
+
+DWORD GetModuleBase(LPSTR lpModuleName, DWORD dwProcessId)
+{
+	MODULEENTRY32 lpModuleEntry = { 0 };
+	HANDLE hSnapShot = CreateToolhelp32Snapshot(TH32CS_SNAPMODULE, dwProcessId);
+
+	if (!hSnapShot)
+		return NULL;
+	lpModuleEntry.dwSize = sizeof(lpModuleEntry);
+	BOOL bModule = Module32First(hSnapShot, &lpModuleEntry);
+	while (bModule)
+	{
+		if (!strcmp(lpModuleEntry.szModule, lpModuleName))
+		{
+			CloseHandle(hSnapShot);
+			return (DWORD)lpModuleEntry.modBaseAddr;
+		}
+		bModule = Module32Next(hSnapShot, &lpModuleEntry);
+	}
+	CloseHandle(hSnapShot);
+	return NULL;
+}
+
+__declspec(naked) void Test() {
+	int* p;
+
+	__asm{
+		mov[edx], 100;
+		mov[p], edx;
+		pop edi;
+		pop esi;
+		pop ebx;
+	}
+
+	*p = 1000000;
+
+	__asm jmp returnAddress;
+}
+
+void main(){
+	int a = 10;
+
+	DWORD pid = NULL;
+
+	pid = GetCurrentProcessId();
+
+	DWORD base = GetModuleBase("Moody.exe", (DWORD)pid);
+
+	DWORD hookAddress = (DWORD)Add + 0x29;
+
+	returnAddress = (DWORD)Add + 0x2E;
+
+	byte in[5] = { 0xE9, 0x90, 0x90, 0x90, 0x90 };
+
+	DWORD *p = (DWORD*)(in + 1);
+
+	*p = (DWORD)Test;
+
+	byte* b = (byte*)hookAddress;
+
+	LONG32 jadd = 0 - (hookAddress - (*p)) - 5;
+
+	//*p = jadd;
+
+	memcpy(p,&jadd,4);
+
+	HANDLE processHandle = OpenProcess(PROCESS_ALL_ACCESS, FALSE, pid);
+
+	WriteProcessMemory(processHandle, (LPVOID)hookAddress, in, 5, NULL);
+
+	while (1){
+		Add(a);
+
+		cout << "PID = " << std::hex << pid << " - " << "0x" << base << endl;
+
+		cout << std::hex << hookAddress << endl;
+
+		cout << std::dec << a << endl;
+
+		system("pause");
+	}
+
+}
